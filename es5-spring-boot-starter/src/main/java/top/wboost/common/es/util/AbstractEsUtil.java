@@ -21,7 +21,7 @@ public abstract class AbstractEsUtil {
     /**Es连接客户端实例**/
     protected static TransportClient client = esClient.transPortClient;
     /**基本分页实体类,查询第一条数据**/
-    protected static BasePage countPage = PageBuilder.begin().setBeginNumber(0).setPageSize(1).build();
+    protected static BasePage countPage = PageBuilder.begin().setBeginNumber(0).setPageSize(0).build();
 
     protected static Logger log = LoggerFactory.getLogger(AbstractEsUtil.class);
 
@@ -31,5 +31,9 @@ public abstract class AbstractEsUtil {
      */
     public static TransportClient getClient() {
         return client;
+    }
+
+    public static BasePage getPage() {
+        return countPage;
     }
 }

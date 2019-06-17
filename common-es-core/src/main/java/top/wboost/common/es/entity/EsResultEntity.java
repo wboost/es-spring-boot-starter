@@ -40,6 +40,8 @@ public class EsResultEntity {
      */
     private long timeValue;
 
+    //SearchResponse response;
+
     public EsResultEntity(List<Map<String, Object>> resultList, long total, Integer beginNumber, Integer pageSize) {
         super();
         this.resultList = resultList;
@@ -97,6 +99,14 @@ public class EsResultEntity {
     public String getScrollId() {
         return scrollId;
     }
+
+//    public SearchResponse getResponse() {
+//        return response;
+//    }
+//
+//    public void setResponse(SearchResponse response) {
+//        this.response = response;
+//    }
 
     public EsResultEntity setScrollId(String scrollId) {
         this.scrollId = scrollId;

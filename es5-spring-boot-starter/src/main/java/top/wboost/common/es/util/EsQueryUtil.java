@@ -4,14 +4,19 @@ import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchScrollRequestBuilder;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
+import org.slf4j.Logger;
 import org.springframework.util.Assert;
 import top.wboost.common.base.page.BasePage;
 import top.wboost.common.base.page.PageBuilder;
 import top.wboost.common.es.entity.EsFilter;
 import top.wboost.common.es.entity.EsResultEntity;
 import top.wboost.common.es.search.*;
+import top.wboost.common.log.util.LoggerUtil;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 
 /**
  * ES查询工具类
@@ -22,6 +27,9 @@ import java.util.Arrays;
  */
 public class EsQueryUtil extends AbstractEsUtil {
 
+    static int MAX_TOTAL = 10000;
+    private static final Logger LOGGER = LoggerUtil.getLogger(EsQueryUtil.class);
+
     /**
      * 查询数据,获取所有字段值
      * @author jwSun
@@ -31,12 +39,64 @@ public class EsQueryUtil extends AbstractEsUtil {
      * @return EsResultEntity
      */
     public static EsResultEntity querySimpleList(EsSearch esSearch, BasePage queryPage, EsFilter... filters) {
-        QueryBuilder boolQueryBuilder = EsQueryAction.getBoolQueryBuilder(esSearch, filters);
-        if (queryPage == null)
-            queryPage = countPage;
-        SearchRequestBuilder builder = EsQueryAction.getSearchRequestBuilder(esSearch, queryPage, boolQueryBuilder);
-        EsResultEntity entity = EsQueryAction.getSimpleEsResultEntity(builder, queryPage);
+        EsResultEntity entity = null;
+        // 判断查询范围是否大于规定from-to最大值，若是，则自动转换为使用scroll查询
+        if (queryPage.getBeginNumber() + queryPage.getEndNumber() > MAX_TOTAL) {
+            LOGGER.debug("use scroll");
+            Integer beginNumber = queryPage.getBeginNumber();
+            EsScrollSearch esScrollSearch = new EsScrollSearch(esSearch.getFirstIndex(), esSearch.getFirstType());
+            esScrollSearch.merge(esSearch);
+            esScrollSearch.setScroll(MAX_TOTAL);
+            //设置为1W条每次查询
+            BasePage findPage = new BasePage(1, MAX_TOTAL);
+            EsResultEntity scrollList = queryScrollList(esScrollSearch, findPage, filters);
+            int index = 0;
+            List<Map<String, Object>> resultList = new ArrayList<>();
+            boolean next = setData(index, index + MAX_TOTAL, scrollList, queryPage, resultList);
+            // 直到值 大于 numEnd时停止
+            while (next) {
+                LOGGER.debug("next page");
+                scrollList = queryByScroll(scrollList);
+                index += MAX_TOTAL;
+                next = setData(index, index + scrollList.getResultList().size(), scrollList, queryPage, resultList);
+            }
+            EsResultEntity ret = new EsResultEntity(resultList, scrollList.getTotal(), queryPage.getBeginNumber(), queryPage.getPageSize());
+            ret.setTimeValue(esScrollSearch.getTimeValue());
+            return ret;
+        } else {
+            QueryBuilder boolQueryBuilder = EsQueryAction.getBoolQueryBuilder(esSearch, filters);
+            SearchRequestBuilder builder = EsQueryAction.getSearchRequestBuilder(esSearch, queryPage, boolQueryBuilder);
+            entity = EsQueryAction.getSimpleEsResultEntity(builder, queryPage);
+        }
         return entity;
+    }
+
+    // 如果整体大于开始值，则将需要的存入结果集
+    private static boolean setData(int index, int nextIndex, EsResultEntity scrollList, BasePage queryPage, List<Map<String, Object>> resultList) {
+        Integer beginAddIndex = null, endAddIndex = null;
+        List<Map<String, Object>> resultListFind = scrollList.getResultList();
+        boolean getEnd = false;
+        if (queryPage.getBeginNumber() >= index && queryPage.getBeginNumber() < nextIndex) {
+            beginAddIndex = queryPage.getBeginNumber() - index;
+            getEnd = true;
+        } else if (index > queryPage.getBeginNumber() && index < queryPage.getEndNumber()) {
+            beginAddIndex = 0;
+            getEnd = true;
+        }
+        if (getEnd) {
+            if (queryPage.getEndNumber() > nextIndex) {
+                endAddIndex = nextIndex - index;
+            } else {
+                endAddIndex = queryPage.getEndNumber() - index;
+            }
+        }
+        if (beginAddIndex != null && endAddIndex != null) {
+            System.out.println((beginAddIndex + index + 1) + "~" + (endAddIndex + index));
+            for (int i = beginAddIndex; i < endAddIndex; i++) {
+                resultList.add(resultListFind.get(i));
+            }
+        }
+        return resultList.size() != queryPage.getPageSize() && (scrollList.getPageSize() + scrollList.getBeginNumber()) < queryPage.getEndNumber();
     }
 
     /**
@@ -91,7 +151,7 @@ public class EsQueryUtil extends AbstractEsUtil {
     public static EsResultEntity queryAggregationList(EsAggregationSearch esAggregationSearch, BasePage queryPage,
             EsFilter... filters) {
         if (queryPage == null)
-            queryPage = PageBuilder.begin().setBeginNumber(0).setPageSize(1).build();
+            queryPage = countPage;
         BoolQueryBuilder boolQueryBuilder = EsQueryAction.getBoolQueryBuilder(esAggregationSearch, filters);
         SearchRequestBuilder builder = EsQueryAction.getSearchRequestBuilder(esAggregationSearch, queryPage,
                 boolQueryBuilder);
@@ -141,7 +201,7 @@ public class EsQueryUtil extends AbstractEsUtil {
         Assert.notNull(esResultEntity.getScrollId());
         SearchScrollRequestBuilder builder = EsQueryAction.getSearchScrollRequestBuilder(esResultEntity.getScrollId(),
                 esResultEntity.getTimeValue());
-        EsResultEntity entity = EsQueryAction.getFieldEsResultEntity(builder,
+        EsResultEntity entity = EsQueryAction.getSimpleEsResultEntity(builder,
                 PageBuilder.begin().setBeginNumber(esResultEntity.getBeginNumber() + esResultEntity.getPageSize())
                         .setPageSize(esResultEntity.getPageSize()).build());
         entity.setTimeValue(esResultEntity.getTimeValue());

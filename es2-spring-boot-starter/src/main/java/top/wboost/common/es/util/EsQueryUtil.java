@@ -44,7 +44,7 @@ public class EsQueryUtil extends AbstractEsUtil {
             Integer beginNumber = queryPage.getBeginNumber();
             EsScrollSearch esScrollSearch = new EsScrollSearch(esSearch.getFirstIndex(), esSearch.getFirstType());
             esScrollSearch.merge(esSearch);
-            esScrollSearch.setScroll(10000);
+            esScrollSearch.setScroll(MAX_TOTAL);
             //设置为1W条每次查询
             BasePage findPage = new BasePage(1, MAX_TOTAL);
             EsResultEntity scrollList = queryScrollList(esScrollSearch, findPage, filters);
